@@ -1,6 +1,8 @@
 """
 Создание клавиатуры главного меню и кнопок "Назад"/"Отмена"
 """
+from __future__ import annotations
+
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 

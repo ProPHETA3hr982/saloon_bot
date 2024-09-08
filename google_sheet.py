@@ -6,6 +6,8 @@ from time import time
 from threading import Lock
 import json
 from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
+
 from google.oauth2.service_account import Credentials
 from retrying import retry
 from cachetools import TTLCache
@@ -18,10 +20,10 @@ myscope = ["https://www.googleapis.com/auth/spreadsheets",
 # Временная зона
 tz = timezone("Europe/Moscow")
 # Название файла json ключа
-creds = Credentials.from_service_account_file('beautysaloon.json', scopes=myscope)
+creds = Credentials.from_service_account_file('telegram-bot-435009-1fb57c80f8c5.json', scopes=myscope)
 client_main = gspread.Client(creds)
 # Название таблицы
-sh = client_main.open('SaloonSheet')
+sh = client_main.open('telegram-bot-435009')
 # Страницы таблицы, которые должны игнорироваться во избежание проблем
 IGNOR_WORKSHEETS = ['Работники']
 # Страница таблицы, на которой перечислены все действующие работники и услуги
@@ -50,7 +52,7 @@ def deserialize_dict(json_str: str) -> dict:
     return json.loads(json_str)
 
 
-def get_cache_days(service_name: str, master_name: str) -> list | None:
+def get_cache_days(service_name: str, master_name: str) -> Optional[list]:
     """
     Запрашивает свободные даты из кэша cashe_days
 
