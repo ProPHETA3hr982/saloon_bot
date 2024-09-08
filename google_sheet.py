@@ -91,24 +91,6 @@ def update_cache_days(service_name: str, master_name: str, available_dates: list
 
 
 @retry(wait_exponential_multiplier=3000, wait_exponential_max=3000)
-def get_service_limits():
-    """
-    Получает лимиты записей на услуги из листа "Лимиты".
-
-    :return: Словарь, где ключ - название услуги, значение - лимит.
-    """
-    with lock:
-        limits_sheet = sh.worksheet("Лимиты")
-        limits_data = limits_sheet.get_all_records()
-
-    service_limits = {}
-    for row in limits_data:
-        service_limits[row["Услуга"].strip()] = int(row["Лимит"])
-
-    return service_limits
-
-
-@retry(wait_exponential_multiplier=3000, wait_exponential_max=3000)
 def get_sheet_names() -> list:
     """
     Запрашивает все имена листов таблицы
@@ -245,9 +227,8 @@ class GoogleSheets:
 
     @retry(wait_exponential_multiplier=3000, wait_exponential_max=3000)
     def get_free_time(self) -> list:
-        """
-        Функция выгружает СВОБОДНОЕ ВРЕМЯ для определенной ДАТЫ с учетом лимитов.
-        """
+        """Функция выгружает ВСЕ СВОБОДНОЕ ВРЕМЯ для определенной ДАТЫ"""
+
         try:
             with lock:
                 all_val = sh.worksheet(self.date_record).get_all_records()
@@ -255,42 +236,19 @@ class GoogleSheets:
             print(not_found, self.date_record, '- Дата занята/не найдена')
             return []
 
-        service_limits = get_service_limits()
-
-        lst = []
         if self.date_record == datetime.now(tz=tz).strftime('%d.%m.%y'):
-            for row in all_val:
-                if (self.name_master is None and row[NAME_COL_SERVICE].strip() == self.name_service) or \
-                        (self.name_master is not None and row[NAME_COL_SERVICE].strip() == self.name_service and
-                         row[NAME_COL_MASTER].strip() == self.name_master):
-                    for key_time, val_use in row.items():
-                        if datetime.now(tz=tz).time() < datetime.strptime(key_time, '%H:%M').time():
-                            if val_use.strip() == '':
-                                lst.append(key_time.strip())
-                            else:
-                                try:
-                                    records = json.loads(val_use)
-                                    if len(records) < service_limits[self.name_service]:
-                                        lst.append(key_time.strip())
-                                except json.JSONDecodeError:
-                                    # Если в ячейке не JSON, считаем ее занятой
-                                    pass
+            lst = [k.strip() for i in all_val
+                   if (self.name_master is None and i[NAME_COL_SERVICE].strip() == self.name_service) or
+                   (self.name_master is not None and i[NAME_COL_SERVICE].strip() == self.name_service and
+                    i[NAME_COL_MASTER].strip() == self.name_master)
+                   for k, v in i.items() if str(v).strip() == '' and
+                   datetime.now(tz=tz).time() < datetime.strptime(k, '%H:%M').time()]
         else:
-            for row in all_val:
-                if (self.name_master is None and row[NAME_COL_SERVICE].strip() == self.name_service) or \
-                        (self.name_master is not None and row[NAME_COL_SERVICE].strip() == self.name_service and
-                         row[NAME_COL_MASTER].strip() == self.name_master):
-                    for key_time, val_use in row.items():
-                        if val_use.strip() == '':
-                            lst.append(key_time.strip())
-                        else:
-                            try:
-                                records = json.loads(val_use)
-                                if len(records) < service_limits[self.name_service]:
-                                    lst.append(key_time.strip())
-                            except json.JSONDecodeError:
-                                # Если в ячейке не JSON, считаем ее занятой
-                                pass
+            lst = [k.strip() for i in all_val
+                   if (self.name_master is None and i[NAME_COL_SERVICE].strip() == self.name_service) or
+                   (self.name_master is not None and i[NAME_COL_SERVICE].strip() == self.name_service and
+                    i[NAME_COL_MASTER].strip() == self.name_master)
+                   for k, v in i.items() if str(v).strip() == '']
 
         if len(lst) > 0:
             lst = sorted(list(set(lst)))
@@ -299,7 +257,12 @@ class GoogleSheets:
     @retry(wait_exponential_multiplier=3000, wait_exponential_max=3000)
     def set_time(self, client_record='', search_criteria='') -> bool:
         """
-        Производит в таблицу запись/отмену клиента с учетом лимитов.
+        Производит в таблицу запись/отмену клиента
+
+        :param client_record: Строка с данными клиента для записи (по умолчанию пустая строка)
+        :param search_criteria: Критерий поиска на листе - "пустая" или "заполненная" (по умолчанию пустая строка)
+
+        :return: True, если операция прошла успешно; False, если произошла ошибка при выполнении операции
         """
         try:
             with lock:
@@ -309,41 +272,18 @@ class GoogleSheets:
             return False
 
         row_num = 1
-        for row in all_val:
+        for i in all_val:
             row_num += 1
             col_num = 0
-            if (self.name_master is None and row[NAME_COL_SERVICE].strip() == self.name_service) or \
-                    (self.name_master is not None and row[NAME_COL_SERVICE].strip() == self.name_service and
-                     row[NAME_COL_MASTER].strip() == self.name_master):
-                for key_time, val_use in row.items():
+            if (self.name_master is None and i[NAME_COL_SERVICE].strip() == self.name_service) or \
+                    (self.name_master is not None and i[NAME_COL_SERVICE].strip() == self.name_service and
+                     i[NAME_COL_MASTER].strip() == self.name_master):
+                for key_time, val_use in i.items():
                     col_num += 1
-                    if key_time.strip() == self.time_record:
-                        if val_use.strip() == '':
-                            # Ячейка пустая, записываем клиента
-                            sh.worksheet(self.date_record).update_cell(row_num, col_num, json.dumps([client_record]))
-
-                        else:
-                            try:
-                                records = json.loads(val_use)
-                                service_limits = get_service_limits()
-                                if len(records) < service_limits[self.name_service]:
-                                    if search_criteria == '' and client_record not in records:
-                                        records.append(client_record)
-                                        sh.worksheet(self.date_record).update_cell(row_num, col_num,
-                                                                                   json.dumps(records))
-                                    elif search_criteria != '' and client_record in records:
-                                        records.remove(client_record)
-                                        if len(records) == 0:
-                                            sh.worksheet(self.date_record).update_cell(row_num, col_num, '')
-                                        else:
-                                            sh.worksheet(self.date_record).update_cell(row_num, col_num,
-                                                                                       json.dumps(records))
-                                else:
-                                    return False
-                            except json.JSONDecodeError:
-                                # Если в ячейке не JSON, считаем ее занятой
-                                return False
-
+                    if key_time.strip() == self.time_record and val_use.strip() == search_criteria:
+                        if self.name_master is None:
+                            self.name_master = i[NAME_COL_MASTER].strip()
+                        sh.worksheet(self.date_record).update_cell(row_num, col_num, f'{client_record}')
                         if (self.lst_records and search_criteria == '') or (self.lst_records and client_record == ''):
                             record = [self.date_record, self.time_record, self.name_service, self.name_master]
                             if search_criteria == '':
@@ -385,7 +325,7 @@ class GoogleSheets:
                     [sheet_obj.title.strip(), k.strip(), dct[NAME_COL_SERVICE].strip(), dct[NAME_COL_MASTER].strip()]
                     for dct in all_val
                     for k, v in dct.items()
-                    if v != '' and client_record in json.loads(v)  # Изменено здесь
+                    if v == client_record and k == date_today.time() < datetime.strptime(k, '%H:%M').time()
                 )
 
             elif date_today.date() < date_sheet.date() <= (date_today + timedelta(days=count_days)).date():
@@ -395,7 +335,7 @@ class GoogleSheets:
                     [sheet_obj.title.strip(), k.strip(), dct[NAME_COL_SERVICE].strip(), dct[NAME_COL_MASTER].strip()]
                     for dct in all_val
                     for k, v in dct.items()
-                    if v != '' and client_record in json.loads(v)  # Изменено здесь
+                    if v == client_record
                 )
 
         lst_records = []
